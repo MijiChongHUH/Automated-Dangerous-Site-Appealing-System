@@ -32,7 +32,7 @@ DGR-Site/
 
 **1. Clone the repo and navigate to the project folder**
 ```bash
-git clone https://github.com/your-repo/DGR-Site.git
+git clone https://github.com/your-repo/DGR-Site.git](https://github.com/MijiChongHUH/Automated-Dangerous-Site-Appealing-System.git
 cd DGR-Site
 ```
 
@@ -59,8 +59,8 @@ cp .env.example .env
 ```json
 {
   "urls": [
-    "https://example.com",
-    "https://suspicious-site.com"
+    "example.com",
+    "suspicious-site.com"
   ]
 }
 ```
@@ -74,7 +74,7 @@ cp .env.example .env
 python checker.py
 
 # Check a single URL
-python checker.py --url https://example.com
+python checker.py --url example.com
 ```
 
 ### Example Output
