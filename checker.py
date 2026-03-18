@@ -1,8 +1,15 @@
 """
-VirusTotal URL Checker
-======================
+VirusTotal URL Checker + False Positive Appeal
+==============================================
 Reads URLs from urls.json, checks each against VirusTotal API,
-and prints results to the terminal.
+prints results, then immediately triggers false positive appeal
+submissions for any vendors that flagged the URL.
+
+Flow per URL:
+  1. Check URL against VirusTotal
+  2. Display results
+  3. For each flagging vendor that has a vendor module → open appeal form
+  4. Move on to the next URL
 
 Rate limiting (free tier):
   - 4 requests/minute → 15s gap between each API call
@@ -35,6 +42,33 @@ except ImportError:
     print("[ERROR] 'python-dotenv' not found. Run: pip install python-dotenv")
     sys.exit(1)
 
+# ─── Vendor appeal registry ───────────────────────────────────────────────────
+# Maps VirusTotal vendor name (lowercase) → appeal module
+# Add new vendors here as vendors/<name>.py is created
+
+VENDOR_MODULES = {}
+
+def _load_vendor_modules():
+    """Dynamically load all available vendor modules from vendors/ folder."""
+    vendors_dir = Path("vendors")
+    if not vendors_dir.exists():
+        return
+    for f in vendors_dir.glob("*.py"):
+        if f.name == "__init__.py":
+            continue
+        module_name = f.stem  # e.g. "alphamountain"
+        try:
+            import importlib.util
+            spec   = importlib.util.spec_from_file_location(module_name, f)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            # Register under the vendor name defined in the module
+            vt_name = getattr(module, "VENDOR_NAME", module_name)
+            VENDOR_MODULES[vt_name.lower()] = module
+            print(f"  [VENDOR] Loaded appeal module: {vt_name}")
+        except Exception as e:
+            print(f"  [VENDOR] Failed to load {f.name}: {e}")
+
 # ─── Load .env ────────────────────────────────────────────────────────────────
 
 load_dotenv()
@@ -53,7 +87,7 @@ API_KEY          = _require_env("VT_API_KEY")
 BASE_URL         = "https://www.virustotal.com/api/v3"
 URLS_FILE        = os.getenv("URLS_FILE", "urls.json")
 CACHE_MAX_AGE    = timedelta(hours=int(os.getenv("CACHE_MAX_AGE_HOURS", "24")))
-RATE_LIMIT_SLEEP = 8.5  # seconds between API calls
+RATE_LIMIT_SLEEP = 15  # seconds between API calls (4 per min = 15s gap)
 
 HEADERS = {
     "x-apikey": API_KEY,
@@ -336,6 +370,47 @@ def print_summary(results: list[dict]):
         for r in suspicious:
             print(f"    • {r['url']}  ({r.get('suspicious',0)} vendors)")
 
+# ─── Appeal trigger ──────────────────────────────────────────────────────────
+
+def run_appeals(result: dict):
+    """
+    After a VT check, trigger appeal submissions for any flagging vendors
+    that have a matching module in vendors/.
+    """
+    flagged_by = result.get("flagged_by", {})
+    if not flagged_by:
+        return
+
+    url = result.get("url", "")
+
+    matched   = []
+    unmatched = []
+
+    for vendor in flagged_by:
+        module = VENDOR_MODULES.get(vendor.lower())
+        if module:
+            matched.append((vendor, module))
+        else:
+            unmatched.append(vendor)
+
+    if not matched:
+        print(f"\n  [APPEAL] No appeal modules available for flagging vendors:")
+        for v in unmatched:
+            print(f"    • {v}")
+        print(f"  [APPEAL] Add vendor modules to vendors/ folder to enable automation.")
+        return
+
+    print(f"\n  [APPEAL] Starting appeals for {len(matched)} vendor(s)...")
+    if unmatched:
+        print(f"  [APPEAL] Skipping {len(unmatched)} vendor(s) with no module: {', '.join(unmatched)}")
+
+    for vendor, module in matched:
+        print(f"\n  [APPEAL] ── Vendor: {vendor} ──")
+        try:
+            module.submit(url=url, flagged_by=flagged_by)
+        except Exception as e:
+            print(f"  [APPEAL] ERROR during {vendor} appeal: {e}")
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def cmd_check_all():
@@ -348,9 +423,13 @@ def cmd_check_all():
         print("[INFO] No URLs found in urls.json.")
         return
 
+    _load_vendor_modules()
+
     print(f"\n{'═'*60}")
-    print(f"  VirusTotal URL Checker")
-    print(f"  URLs to check : {len(urls)}")
+    print(f"  VirusTotal URL Checker + Appeal Automation")
+    print(f"  URLs to check   : {len(urls)}")
+    print(f"  Vendor modules  : {len(VENDOR_MODULES)}")
+    print(f"  Rate limit      : {RATE_LIMIT_SLEEP}s between API calls")
     print(f"{'═'*60}")
 
     results = []
@@ -360,15 +439,20 @@ def cmd_check_all():
         print_result(result)
         results.append(result)
 
+        # ── Immediately run appeals for this URL before moving to next ──
+        run_appeals(result)
+
     print_summary(results)
 
 
 def cmd_check_single(url: str):
+    _load_vendor_modules()
     print(f"\n{'═'*60}")
     print(f"  VirusTotal URL Checker — Single URL")
     print(f"{'═'*60}")
     result = check_url(url)
     print_result(result)
+    run_appeals(result)
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 

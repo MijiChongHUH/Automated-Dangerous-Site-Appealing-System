@@ -246,7 +246,7 @@ For vendors that require email-based appeals:
 |-------|-----------|---------|
 | 1 (current) | `Python 3.12`, `requests`, `python-dotenv` | CLI checker, API calls, environment config |
 | 2 | `Flask` or `FastAPI`, HTML/JS | Web server and browser frontend |
-| 3–4 | `Playwright`, JSON vendor map | Browser automation, vendor routing |
+| 3–4 | `chromium`, `Playwright`, JSON vendor map | Browser automation, vendor routing |
 | 5–6 | `smtplib`, SQLite / JSON | Email sending, appeal history tracking |
 
 ---
