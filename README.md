@@ -32,7 +32,7 @@ DGR-Site/
 
 **1. Clone the repo and navigate to the project folder**
 ```bash
-git clone https://github.com/your-repo/DGR-Site.git
+git clone https://github.com/MijiChongHUH/Automated-Dangerous-Site-Appealing-System.git
 cd DGR-Site
 ```
 
