@@ -59,9 +59,9 @@ cp .env.example .env
 ```json
 {
   "urls": [
-    "bk-8good.biz",
     "example.com",
-    "https://another-site.com"
+    "https://another-site1.com",
+    "http://another-site2.com",
   ]
 }
 ```
