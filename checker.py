@@ -169,6 +169,7 @@ def fetch_report(url: str) -> dict | None:
 def submit_url(url: str) -> str | None:
     """
     POST /urls — submit URL for a fresh scan.
+    VT accepts bare domains, http://, or https:// — no normalisation needed.
     Returns the analysis ID, or None on failure.
     """
     print(f"  [API] Submitting URL for fresh scan...")
@@ -323,7 +324,7 @@ def print_summary(results: list[dict]):
     print(f"  🔴 Dangerous  : {len(dangerous)}")
     print(f"  🟡 Suspicious : {len(suspicious)}")
     print(f"  🟢 Clean      : {len(clean)}")
-    print(f"  ⚠️ Errors     : {len(errors)}")
+    print(f"  ⚠️  Errors     : {len(errors)}")
 
     if dangerous:
         print(f"\n  Dangerous URLs:")

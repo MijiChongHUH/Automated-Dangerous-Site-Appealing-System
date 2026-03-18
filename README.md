@@ -77,7 +77,7 @@ cp .env.example .env
 python checker.py
 
 # Check a single URL
-python checker.py --url example.com
+python checker.py --url bk-8good.biz
 ```
 
 ### Example Output
@@ -211,13 +211,13 @@ Build a JSON lookup table mapping each VirusTotal vendor name to their appeal me
 
 ```json
 {
-   "Vendor A": {
-    "method": "email",
-    "address": "appeal@vendorA.com"
+  "Vendor A": {
+    "method": "form",
+    "url": "https://false_positive_report.com"
   },
   "Vendor B": {
     "method": "email",
-    "address": "appeal@vendorB.com"
+    "address": "appeal@vendor.com"
   }
 }
 ```
@@ -259,9 +259,3 @@ For vendors that require email-based appeals:
 - [ ] Research each flagging vendor — note whether they use a web form or email for appeals
 - [ ] Prepare the vendor map JSON file with form URLs / email addresses
 - [ ] Begin Phase 2 — set up Flask/FastAPI server and basic web frontend
-
----
-
-## 📄 License
-
-Internal use only
