@@ -53,7 +53,7 @@ API_KEY          = _require_env("VT_API_KEY")
 BASE_URL         = "https://www.virustotal.com/api/v3"
 URLS_FILE        = os.getenv("URLS_FILE", "urls.json")
 CACHE_MAX_AGE    = timedelta(hours=int(os.getenv("CACHE_MAX_AGE_HOURS", "24")))
-RATE_LIMIT_SLEEP = 9  # seconds between API calls 
+RATE_LIMIT_SLEEP = 8.5  # seconds between API calls
 
 HEADERS = {
     "x-apikey": API_KEY,
@@ -63,9 +63,29 @@ HEADERS = {
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def url_to_id(url: str) -> str:
-    """VirusTotal uses URL-safe base64(sha256(url)) as the URL identifier."""
+    """
+    VirusTotal URL ID = URL-safe base64(sha256(url)) with no padding.
+    IMPORTANT: VT computes the hash on the normalised URL it stores internally.
+    For bare domains (no scheme) VT may normalise differently, so we also
+    try the https:// prefixed version as a fallback in fetch_report().
+    """
     digest = hashlib.sha256(url.encode()).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+def url_to_id_variants(url: str) -> list:
+    """
+    Return all ID variants to try for a given input:
+      - as-is
+      - with https:// prefix (if no scheme present)
+      - with http://  prefix (if no scheme present)
+    This handles bare domains like 'bk-8good.biz' gracefully.
+    """
+    variants = [url]
+    if not url.startswith("http://") and not url.startswith("https://"):
+        variants.append("https://" + url)
+        variants.append("http://"  + url)
+    return [url_to_id(v) for v in variants]
 
 
 def wait():
@@ -120,22 +140,30 @@ def parse_analysis(attributes: dict) -> dict:
 def fetch_report(url: str) -> dict | None:
     """
     GET /urls/{id} — fetch VT's stored report for a URL.
-    Returns parsed result dict if found, None if 404.
+    Tries all ID variants (bare domain, https://, http://) so that
+    entries like 'bk-8good.biz' are found even without a scheme.
+    Returns parsed result dict if found, None if not found.
     """
-    url_id = url_to_id(url)
+    ids = url_to_id_variants(url)
     print(f"  [API] Fetching VT report...")
-    resp = requests.get(f"{BASE_URL}/urls/{url_id}", headers=HEADERS, timeout=20)
-    wait()
 
-    if resp.status_code == 200:
-        attrs = resp.json().get("data", {}).get("attributes", {})
-        return parse_analysis(attrs)
+    for url_id in ids:
+        resp = requests.get(f"{BASE_URL}/urls/{url_id}", headers=HEADERS, timeout=20)
+        wait()
 
-    if resp.status_code == 404:
-        return None  # Never seen by VT before
+        if resp.status_code == 200:
+            attrs = resp.json().get("data", {}).get("attributes", {})
+            return parse_analysis(attrs)
 
-    print(f"  [WARN] Unexpected response {resp.status_code}: {resp.text[:200]}")
-    return None
+        if resp.status_code == 404:
+            continue  # Try next variant
+
+        if resp.status_code == 400:
+            continue  # Invalid ID for this variant, try next
+
+        print(f"  [WARN] Unexpected response {resp.status_code}: {resp.text[:200]}")
+
+    return None  # Not found under any variant
 
 
 def submit_url(url: str) -> str | None:
