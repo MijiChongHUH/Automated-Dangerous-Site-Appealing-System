@@ -1,6 +1,7 @@
 # Secrets — never commit these
 .env
 urls.json
+template.json
 
 # Python
 __pycache__/
