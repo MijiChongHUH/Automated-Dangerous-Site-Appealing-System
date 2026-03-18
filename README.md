@@ -61,7 +61,7 @@ cp .env.example .env
   "urls": [
     "example.com",
     "https://another-site1.com",
-    "http://another-site2.com",
+    "http://another-site2.com"
   ]
 }
 ```
