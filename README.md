@@ -249,4 +249,4 @@ For vendors that require email-based appeals:
 
 ## 📄 License
 
-Internal use only — BS Group
+Internal use only
