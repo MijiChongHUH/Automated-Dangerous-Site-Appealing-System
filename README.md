@@ -77,7 +77,7 @@ cp .env.example .env
 python checker.py
 
 # Check a single URL
-python checker.py --url bk-8good.biz
+python checker.py --url example.com
 ```
 
 ### Example Output
@@ -90,7 +90,7 @@ python checker.py --url bk-8good.biz
 
 [1/3]
 ────────────────────────────────────────────────────────────
-Checking: bk-8good.biz
+Checking: example.com
   [API] Fetching VT report...
   [OK] VT report is fresh (within 24h), using it.
   Status   : 🔴 DANGEROUS
@@ -116,9 +116,9 @@ Each URL goes through this decision flow:
 
 ```
 Step 1 — Look up existing VT report (up to 3 ID variants tried)
-    ┌─ Try ID of: bk-8good.biz
-    ├─ Try ID of: https://bk-8good.biz
-    └─ Try ID of: http://bk-8good.biz
+    ┌─ Try ID of: example.com
+    ├─ Try ID of: https://example.com
+    └─ Try ID of: http://example.com
     
     Stop at first match. This is a lookup only — NOT a scan.
     No match found = proceed to Step 3.
@@ -151,7 +151,7 @@ Free VirusTotal tier limits:
 
 | Limit | Value | How it's handled |
 |-------|-------|-----------------|
-| Per minute | 4 requests | 15s sleep after every API call |
+| Per minute | 4 requests | 8.5s sleep after every API call |
 | Per day | 500 requests | User manages number of URLs per run |
 | Cache window | 24 hours | VT reports fresher than 24h are reused without rescanning |
 
@@ -163,9 +163,9 @@ URLs in `urls.json` can be in any of these formats — no manual formatting need
 
 | Format | Example | Behaviour |
 |--------|---------|-----------|
-| Bare domain | `bk-8good.biz` | Script tries bare, `https://`, and `http://` IDs |
-| With https | `https://bk-8good.biz` | Used directly |
-| With http | `http://bk-8good.biz` | Used directly |
+| Bare domain | `example.com` | Script tries bare, `https://`, and `http://` IDs |
+| With https | `https://example.com` | Used directly |
+| With http | `http://example.com` | Used directly |
 
 ---
 
@@ -212,13 +212,13 @@ Build a JSON lookup table mapping each VirusTotal vendor name to their appeal me
 
 ```json
 {
-  "Google Safe Browsing": {
-    "method": "form",
-    "url": "https://safebrowsing.google.com/safebrowsing/report_error"
+   "Vendor A": {
+    "method": "email",
+    "address": "appeal@vendorA.com"
   },
   "Vendor B": {
     "method": "email",
-    "address": "appeal@vendor.com"
+    "address": "appeal@vendorB.com"
   }
 }
 ```
@@ -265,4 +265,4 @@ For vendors that require email-based appeals:
 
 ## 📄 License
 
-Internal use only — BS Group
+Internal use only
