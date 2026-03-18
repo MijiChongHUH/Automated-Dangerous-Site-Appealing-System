@@ -1,0 +1,9 @@
+{
+  "urls": [
+    "https://google.com",
+    "https://facebook.com",
+    "https://example.com",
+    "https://malware.testing.google.test/testing/malware/",
+    "https://github.com"
+  ]
+}

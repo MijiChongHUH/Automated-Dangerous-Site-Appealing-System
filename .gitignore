@@ -1,0 +1,13 @@
+# Secrets — never commit these
+.env
+.vt_rate_state.json
+
+# Output files (optional — remove if you want to track results in git)
+results.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
