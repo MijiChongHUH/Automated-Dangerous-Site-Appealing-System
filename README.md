@@ -85,7 +85,6 @@ python checker.py --url example.com
 ════════════════════════════════════════════════════════════
   VirusTotal URL Checker
   URLs to check : 3
-  Rate limit    : 15s between API calls
 ════════════════════════════════════════════════════════════
 
 [1/3]
@@ -105,7 +104,7 @@ Checking: example.com
   🔴 Dangerous  : 1
   🟡 Suspicious : 0
   🟢 Clean      : 2
-  ⚠️  Errors     : 0
+  ⚠️ Errors     : 0
 ```
 
 ---
