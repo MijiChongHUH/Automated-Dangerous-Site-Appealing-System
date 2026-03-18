@@ -77,7 +77,7 @@ cp .env.example .env
 python checker.py
 
 # Check a single URL
-python checker.py --url bk-8good.biz
+python checker.py --url example.com
 ```
 
 ### Example Output
