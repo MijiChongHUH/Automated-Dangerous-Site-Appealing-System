@@ -32,7 +32,7 @@ DGR-Site/
 
 **1. Clone the repo and navigate to the project folder**
 ```bash
-git clone https://github.com/your-repo/DGR-Site.git](https://github.com/MijiChongHUH/Automated-Dangerous-Site-Appealing-System.git
+git clone https://github.com/your-repo/DGR-Site.git
 cd DGR-Site
 ```
 
@@ -59,11 +59,14 @@ cp .env.example .env
 ```json
 {
   "urls": [
+    "bk-8good.biz",
     "example.com",
-    "suspicious-site.com"
+    "https://another-site.com"
   ]
 }
 ```
+
+> ✅ URLs can be entered in any format — bare domain, `http://`, or `https://`. The script handles all formats automatically.
 
 ---
 
@@ -74,7 +77,7 @@ cp .env.example .env
 python checker.py
 
 # Check a single URL
-python checker.py --url example.com
+python checker.py --url bk-8good.biz
 ```
 
 ### Example Output
@@ -85,16 +88,11 @@ python checker.py --url example.com
   Rate limit    : 15s between API calls
 ════════════════════════════════════════════════════════════
 
-[1/3] Checking: https://example.com
+[1/3]
+────────────────────────────────────────────────────────────
+Checking: bk-8good.biz
   [API] Fetching VT report...
   [OK] VT report is fresh (within 24h), using it.
-  Status   : 🟢 CLEAN
-  Malicious: 0  Suspicious: 0  Harmless: 72  Undetected: 14  (of 86 vendors)
-  Flagged by: none
-
-[2/3] Checking: https://suspicious-site.com
-  [API] Fetching VT report...
-  [STALE] VT report is older than 24h — submitting for rescan...
   Status   : 🔴 DANGEROUS
   Malicious: 5  Suspicious: 2  Harmless: 60  Undetected: 10  (of 77 vendors)
   Flagged by (5 vendors):
@@ -117,27 +115,33 @@ python checker.py --url example.com
 Each URL goes through this decision flow:
 
 ```
-Step 1 — Fetch VT Report
-    GET /urls/{id}
-    Retrieves VirusTotal's stored scan report (1 API call)
+Step 1 — Look up existing VT report (up to 3 ID variants tried)
+    ┌─ Try ID of: bk-8good.biz
+    ├─ Try ID of: https://bk-8good.biz
+    └─ Try ID of: http://bk-8good.biz
+    
+    Stop at first match. This is a lookup only — NOT a scan.
+    No match found = proceed to Step 3.
          │
          ▼
-Step 2 — Check Freshness
+Step 2 — Check freshness of found report
     Is VT's last analysis within 24 hours?
-    ├── YES → Use result immediately ✅
+    ├── YES → Use result immediately ✅ (no scan needed)
     └── NO  → Proceed to Step 3
          │
          ▼
-Step 3 — Submit Fresh Scan
-    POST /urls  →  submit URL for new scan
-    GET  /analyses/{id}  →  poll until completed
-    (~2 API calls)
+Step 3 — Submit for fresh scan (only if stale or not found)
+    POST /urls with the original input
+    VT normalises the URL on their end and runs a full scan
+    GET  /analyses/{id} → poll until completed (~2 API calls)
          │
          ▼
 Step 4 — Display Results
     🔴 DANGEROUS  /  🟡 SUSPICIOUS  /  🟢 CLEAN
     + list of flagging vendors and their verdicts
 ```
+
+> **Note:** The 3 ID variants in Step 1 are lookups only — not 3 separate scans. Only 1 scan is ever submitted per URL in Step 3.
 
 ---
 
@@ -150,6 +154,18 @@ Free VirusTotal tier limits:
 | Per minute | 4 requests | 15s sleep after every API call |
 | Per day | 500 requests | User manages number of URLs per run |
 | Cache window | 24 hours | VT reports fresher than 24h are reused without rescanning |
+
+---
+
+## 🔗 URL Format Support
+
+URLs in `urls.json` can be in any of these formats — no manual formatting needed:
+
+| Format | Example | Behaviour |
+|--------|---------|-----------|
+| Bare domain | `bk-8good.biz` | Script tries bare, `https://`, and `http://` IDs |
+| With https | `https://bk-8good.biz` | Used directly |
+| With http | `http://bk-8good.biz` | Used directly |
 
 ---
 
@@ -169,7 +185,7 @@ Free VirusTotal tier limits:
 | **1** | URL Checker (Python Script) | Read URLs from `urls.json`, call VirusTotal API, display results in terminal with rate limiting and 24h freshness check | ✅ Done |
 | **2** | Frontend Web Interface | Move `checker.py` to a script server with a web frontend so users can submit URLs through a browser UI instead of terminal | 📋 Next |
 | **3** | Vendor Map & Appeal Router | Build a lookup table mapping each security vendor to their false positive web form URL or appeal email address | 🔜 Planned |
-| **4** | Automated Form Submission | Use Playwright/Selenium to auto-fill false positive forms. Pause for user to solve reCAPTCHA, then auto-submit | 🔜 Planned |
+| **4** | Automated Form Submission | Use Playwright to auto-fill false positive forms. Pause for user to solve reCAPTCHA, then auto-submit | 🔜 Planned |
 | **5** | Automated Email Appeals | Generate and send appeal emails to vendors that require email-based false positive reports | 🔜 Planned |
 | **6** | Appeal Status Tracking | Track which vendors have been contacted, when, and what response was received per URL | 🔜 Planned |
 
@@ -249,4 +265,4 @@ For vendors that require email-based appeals:
 
 ## 📄 License
 
-Internal use only
+Internal use only — BS Group
