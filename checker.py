@@ -323,7 +323,7 @@ def print_summary(results: list[dict]):
     print(f"  🔴 Dangerous  : {len(dangerous)}")
     print(f"  🟡 Suspicious : {len(suspicious)}")
     print(f"  🟢 Clean      : {len(clean)}")
-    print(f"  ⚠️  Errors     : {len(errors)}")
+    print(f"  ⚠️ Errors     : {len(errors)}")
 
     if dangerous:
         print(f"\n  Dangerous URLs:")
@@ -350,7 +350,6 @@ def cmd_check_all():
     print(f"\n{'═'*60}")
     print(f"  VirusTotal URL Checker")
     print(f"  URLs to check : {len(urls)}")
-    print(f"  Rate limit    : {RATE_LIMIT_SLEEP}s between API calls")
     print(f"{'═'*60}")
 
     results = []
