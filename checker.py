@@ -87,7 +87,7 @@ API_KEY          = _require_env("VT_API_KEY")
 BASE_URL         = "https://www.virustotal.com/api/v3"
 URLS_FILE        = os.getenv("URLS_FILE", "urls.json")
 CACHE_MAX_AGE    = timedelta(hours=int(os.getenv("CACHE_MAX_AGE_HOURS", "24")))
-RATE_LIMIT_SLEEP = 15  # seconds between API calls (4 per min = 15s gap)
+RATE_LIMIT_SLEEP = 8.5  # seconds between API calls
 
 HEADERS = {
     "x-apikey": API_KEY,
