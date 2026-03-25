@@ -1,0 +1,1 @@
+#https://www.fortiguard.com/faq/malurl
