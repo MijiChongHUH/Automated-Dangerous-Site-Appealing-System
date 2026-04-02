@@ -1,50 +1,3 @@
-"""
-vendors/alphamountain.py
-========================
-Selenium automation for alphaMountain.ai false positive submission.
-Form URL: https://www.alphamountain.ai/false-positive/
-
-Root cause of description field failure
-────────────────────────────────────────
-The form is served inside a Freshdesk iframe (alphamountain.freshdesk.com).
-Freshdesk uses Redactor.js as its rich-text editor. Redactor's init sequence:
-
-  1. Hides the original <textarea>
-  2. Injects  div.redactor-box
-               ├─ ul.redactor-toolbar
-               └─ div[contenteditable="true"]   ← actual editor
-  3. Places a <p><br></p> placeholder inside the contenteditable div
-
-If we write to the contenteditable div with JS (innerHTML / innerText /
-execCommand) BEFORE Redactor finishes step 3, Redactor's own init immediately
-overwrites our content with its placeholder.
-
-Even if we write AFTER, Redactor's submit handler reads from its internal
-model (not from the DOM) unless typing events are fired in the correct order.
-
-Solution: wait for Redactor to finish init (the <p> placeholder appears),
-then use Selenium ActionChains to CLICK the editor and TYPE the text
-character by character. This is identical to a real user typing and Redactor
-handles it perfectly — no JS injection needed for the body field.
-
-Field map
-─────────
-  Email    → input[type="email"]
-  Name     → helpdesk_ticket[name]
-  Subject  → helpdesk_ticket[subject]
-  Body     → div[contenteditable="true"]  — filled by ActionChains typing
-  Website  → helpdesk_ticket[custom_field][cf_website_1555433]
-  Category → helpdesk_ticket[custom_field][cf_suggested_category_1555433]
-
-Dependencies
-────────────
-  pip install selenium webdriver-manager
-  pip install pyperclip          # optional but recommended as fallback
-  # Linux only: sudo apt install xclip   (needed by pyperclip)
-
-Vendor name in VirusTotal: "alphaMountain.ai"
-"""
-
 import json
 import time
 from datetime import datetime
@@ -72,7 +25,7 @@ except ImportError:
 
 
 FORM_URL    = "https://www.alphamountain.ai/false-positive/"
-VENDOR_NAME = "alphaMountain.ai"
+VENDOR_NAME = "alphaMountain.AI"
 TEMPLATE    = json.loads(Path("template.json").read_text())
 
 # ── Selectors ─────────────────────────────────────────────────────────────────
