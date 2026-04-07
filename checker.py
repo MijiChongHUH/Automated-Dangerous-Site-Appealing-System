@@ -1,35 +1,3 @@
-"""
-VirusTotal URL Checker + False Positive Appeal
-==============================================
-Reads URLs from urls.json, checks each against VirusTotal API,
-prints results, then immediately triggers false positive appeal
-submissions for any vendors that flagged the URL.
-
-Flow per URL:
-  1. Check URL against VirusTotal
-  2. Display results
-  3. For each flagging vendor that has a vendor module → fill appeal form
-  4. Move on to the next URL
-
-Speed optimisations vs original
-────────────────────────────────
-  • Scan poll: 5 s sleep (was 10 s), stops as soon as status=="completed"
-  • Rate-limit gap: 8.5 s (unchanged — hard API limit on free tier)
-  • Shared Chrome driver: created once before the URL loop, injected into
-    every vendor module via module.set_shared_driver(driver).  Saves 3–5 s
-    cold-start + 4–8 s iframe reload per URL.
-  • Browser opened in parallel with first VT API call so it's warm by the
-    time appeals start.
-
-Rate limiting (free tier):
-  - 4 requests/minute → 8.5 s gap between each API call
-  - 500 requests/day
-
-Usage:
-  python checker.py                  # Check all URLs in urls.json
-  python checker.py --url <url>      # Check a single URL
-"""
-
 import json
 import time
 import hashlib
@@ -37,7 +5,6 @@ import base64
 import argparse
 import os
 import sys
-import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -53,29 +20,6 @@ except ImportError:
     print("[ERROR] 'python-dotenv' not found. Run: pip install python-dotenv")
     sys.exit(1)
 
-# ─── Vendor appeal registry ───────────────────────────────────────────────────
-
-VENDOR_MODULES = {}
-
-def _load_vendor_modules():
-    vendors_dir = Path("vendors")
-    if not vendors_dir.exists():
-        return
-    for f in vendors_dir.glob("*.py"):
-        if f.name == "__init__.py":
-            continue
-        module_name = f.stem
-        try:
-            import importlib.util
-            spec   = importlib.util.spec_from_file_location(module_name, f)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            vt_name = getattr(module, "VENDOR_NAME", module_name)
-            VENDOR_MODULES[vt_name.lower()] = module
-            print(f"  [VENDOR] Loaded: {vt_name}")
-        except Exception as e:
-            print(f"  [VENDOR] Failed to load {f.name}: {e}")
-
 # ─── Load .env ────────────────────────────────────────────────────────────────
 
 load_dotenv()
@@ -83,33 +27,67 @@ load_dotenv()
 def _require_env(key: str) -> str:
     val = os.getenv(key)
     if not val:
-        print(f"[ERROR] Missing env variable: {key}  (add to .env)")
+        print(f"[ERROR] Missing required env variable: {key}")
+        print(f"        Add it to your .env file. See .env.example for reference.")
         sys.exit(1)
     return val
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 API_KEY          = _require_env("VT_API_KEY")
-BASE_URL         = "https://www.virustotal.com/api/v3"
+BASE_URL         = _require_env("VT_BASE_URL")
 URLS_FILE        = os.getenv("URLS_FILE", "urls.json")
 CACHE_MAX_AGE    = timedelta(hours=int(os.getenv("CACHE_MAX_AGE_HOURS", "24")))
-RATE_LIMIT_SLEEP = 8.5   # seconds — do NOT reduce (free-tier API limit)
-POLL_SLEEP       = 5     # seconds between scan completion polls (was 10)
-POLL_MAX         = 8     # max poll attempts before giving up (was 6)
+RATE_LIMIT_SLEEP = 8.5  # seconds between API calls
 
 HEADERS = {
     "x-apikey": API_KEY,
     "Accept":   "application/json",
 }
 
+# ─── Vendor appeal registry ───────────────────────────────────────────────────
+# Loaded from vendors/__init__.py — edit that file to enable/disable vendors.
+
+VENDOR_MODULES: dict = {}
+
+def _load_vendor_modules():
+    """
+    Import vendors/__init__.py and copy its VENDOR_MODULES registry.
+    Vendors are enabled/disabled by editing vendors/__init__.py directly.
+    """
+    global VENDOR_MODULES
+    try:
+        # Ensure the project root is on sys.path so `vendors` is importable
+        project_root = str(Path(__file__).parent.resolve())
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+
+        import vendors as _vendors_pkg
+        VENDOR_MODULES = _vendors_pkg.VENDOR_MODULES
+        print(f"  [VENDOR] Registry loaded from vendors/__init__.py")
+    except ImportError as e:
+        print(f"  [VENDOR] WARNING : Could not import vendors package: {e}")
+        print(f"  [VENDOR]           Make sure vendors/__init__.py exists.")
+    except Exception as e:
+        print(f"  [VENDOR] ERROR loading vendors: {e}")
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def url_to_id(url: str) -> str:
+    """
+    VirusTotal URL ID = URL-safe base64(sha256(url)) with no padding.
+    """
     digest = hashlib.sha256(url.encode()).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
 def url_to_id_variants(url: str) -> list:
+    """
+    Return all ID variants to try for a given input:
+      - as-is
+      - with https:// prefix (if no scheme present)
+      - with http://  prefix (if no scheme present)
+    """
     variants = [url]
     if not url.startswith("http://") and not url.startswith("https://"):
         variants.append("https://" + url)
@@ -118,11 +96,13 @@ def url_to_id_variants(url: str) -> list:
 
 
 def wait():
-    print(f"  [RATE] Waiting {RATE_LIMIT_SLEEP}s...")
+    """Sleep between API calls to respect the 4 req/min free tier limit."""
+    print(f"  [RATE] Waiting {RATE_LIMIT_SLEEP}s before next API call...")
     time.sleep(RATE_LIMIT_SLEEP)
 
 
 def is_within_24h(timestamp_str: str) -> bool:
+    """Return True if the ISO timestamp is within the last 24 hours."""
     if not timestamp_str:
         return False
     try:
@@ -135,45 +115,61 @@ def is_within_24h(timestamp_str: str) -> bool:
 
 
 def parse_analysis(attributes: dict) -> dict:
+    """Extract a clean summary from VT analysis attributes."""
     stats   = attributes.get("last_analysis_stats", {})
     vendors = attributes.get("last_analysis_results", {})
+
     flagged = {
         vendor: info.get("result") or info.get("category", "unknown")
         for vendor, info in vendors.items()
         if info.get("category") in ("malicious", "suspicious")
     }
-    last_ts  = attributes.get("last_analysis_date")
-    last_str = None
-    if last_ts:
-        last_str = datetime.fromtimestamp(last_ts, tz=timezone.utc).isoformat()
+
+    last_analysis_ts  = attributes.get("last_analysis_date")
+    last_analysis_str = None
+    if last_analysis_ts:
+        last_analysis_str = datetime.fromtimestamp(
+            last_analysis_ts, tz=timezone.utc
+        ).isoformat()
+
     return {
-        "malicious":        stats.get("malicious",  0),
+        "malicious":        stats.get("malicious", 0),
         "suspicious":       stats.get("suspicious", 0),
-        "harmless":         stats.get("harmless",   0),
+        "harmless":         stats.get("harmless", 0),
         "undetected":       stats.get("undetected", 0),
         "total_vendors":    sum(stats.values()),
         "flagged_by":       flagged,
-        "last_vt_analysis": last_str,
+        "last_vt_analysis": last_analysis_str,
     }
 
 # ─── API calls ────────────────────────────────────────────────────────────────
 
 def fetch_report(url: str) -> dict | None:
+    """
+    GET /urls/{id} — fetch VT's stored report for a URL.
+    Tries all ID variants so bare domains are handled correctly.
+    """
     ids = url_to_id_variants(url)
     print(f"  [API] Fetching VT report...")
+
     for url_id in ids:
         resp = requests.get(f"{BASE_URL}/urls/{url_id}", headers=HEADERS, timeout=20)
         wait()
+
         if resp.status_code == 200:
             attrs = resp.json().get("data", {}).get("attributes", {})
             return parse_analysis(attrs)
-        if resp.status_code in (404, 400):
+
+        if resp.status_code in (400, 404):
             continue
-        print(f"  [WARN] Unexpected {resp.status_code}: {resp.text[:200]}")
+
+        print(f"  [WARN] Unexpected response {resp.status_code}: {resp.text[:200]}")
+
     return None
 
 
 def submit_url(url: str) -> str | None:
+    """POST /urls — submit URL for a fresh scan. Returns analysis ID or None."""
     print(f"  [API] Submitting URL for fresh scan...")
     resp = requests.post(
         f"{BASE_URL}/urls",
@@ -182,25 +178,23 @@ def submit_url(url: str) -> str | None:
         timeout=20,
     )
     wait()
+
     if resp.status_code in (200, 201):
         return resp.json().get("data", {}).get("id")
+
     print(f"  [WARN] Submit failed {resp.status_code}: {resp.text[:200]}")
     return None
 
 
 def poll_analysis(analysis_id: str) -> dict | None:
-    """
-    Poll GET /analyses/{id} until status=="completed".
-    Uses POLL_SLEEP (5 s) and stops as soon as the scan is done,
-    rather than always sleeping 10 s × 6 times.
-    """
-    for attempt in range(1, POLL_MAX + 1):
-        print(f"  [API] Polling result (attempt {attempt}/{POLL_MAX})...")
-        time.sleep(POLL_SLEEP)
-
+    """GET /analyses/{id} — poll until completed (max 6 attempts)."""
+    for attempt in range(1, 7):
+        print(f"  [API] Polling result (attempt {attempt}/6)...")
+        time.sleep(10)
         resp = requests.get(
             f"{BASE_URL}/analyses/{analysis_id}",
-            headers=HEADERS, timeout=20,
+            headers=HEADERS,
+            timeout=20,
         )
         wait()
 
@@ -210,35 +204,34 @@ def poll_analysis(analysis_id: str) -> dict | None:
         data   = resp.json().get("data", {})
         status = data.get("attributes", {}).get("status")
 
-        if status != "completed":
-            print(f"  [API] Status: {status} — waiting...")
-            continue
+        if status == "completed":
+            attrs       = data.get("attributes", {})
+            results_raw = attrs.get("results", {})
 
-        # ── Completed: extract results ────────────────────────────────────
-        attrs       = data.get("attributes", {})
-        results_raw = attrs.get("results", {})
-        stats   = {"malicious": 0, "suspicious": 0, "harmless": 0, "undetected": 0}
-        flagged = {}
-        for vendor, info in results_raw.items():
-            cat = info.get("category", "undetected")
-            if cat in stats:
-                stats[cat] += 1
-            if cat in ("malicious", "suspicious"):
-                flagged[vendor] = info.get("result") or cat
+            stats   = {"malicious": 0, "suspicious": 0, "harmless": 0, "undetected": 0}
+            flagged = {}
 
-        return {
-            "last_vt_analysis": datetime.now(timezone.utc).isoformat(),
-            "total_vendors":    sum(stats.values()),
-            "flagged_by":       flagged,
-            **stats,
-        }
+            for vendor, info in results_raw.items():
+                cat = info.get("category", "undetected")
+                if cat in stats:
+                    stats[cat] += 1
+                if cat in ("malicious", "suspicious"):
+                    flagged[vendor] = info.get("result") or cat
 
-    print(f"  [WARN] Polling timed out after {POLL_MAX} attempts.")
+            return {
+                "last_vt_analysis": datetime.now(timezone.utc).isoformat(),
+                "total_vendors":    sum(stats.values()),
+                "flagged_by":       flagged,
+                **stats,
+            }
+
+    print(f"  [WARN] Polling timed out after 6 attempts.")
     return None
 
 # ─── Core checker ─────────────────────────────────────────────────────────────
 
 def check_url(url: str) -> dict:
+    """Check a single URL against VirusTotal."""
     url = url.strip().rstrip("/")
     print(f"\n{'─'*60}")
     print(f"Checking: {url}")
@@ -246,15 +239,15 @@ def check_url(url: str) -> dict:
     report = fetch_report(url)
 
     if report and is_within_24h(report.get("last_vt_analysis")):
-        print(f"  [OK] VT report fresh (within 24h).")
+        print(f"  [OK] VT report is fresh (within 24h), using it.")
         report["url"]    = url
         report["source"] = "existing_report"
         return report
 
     if report:
-        print(f"  [STALE] VT report older than 24h — rescanning...")
+        print(f"  [STALE] VT report is older than 24h — submitting for rescan...")
     else:
-        print(f"  [NEW] URL not in VT — submitting for first scan...")
+        print(f"  [NEW] URL not in VT database — submitting for first scan...")
 
     analysis_id = submit_url(url)
     if not analysis_id:
@@ -266,7 +259,7 @@ def check_url(url: str) -> dict:
         result["source"] = "fresh_scan"
         return result
 
-    print(f"  [FALLBACK] Fetching report after scan submission...")
+    print(f"  [FALLBACK] Trying to fetch report after scan submission...")
     report = fetch_report(url)
     if report:
         report["url"]    = url
@@ -278,21 +271,26 @@ def check_url(url: str) -> dict:
 # ─── Display ──────────────────────────────────────────────────────────────────
 
 def print_result(entry: dict):
+    """Pretty-print a single result to the terminal."""
     if "error" in entry:
         print(f"  ⚠️  ERROR: {entry['error']}")
         return
+
     risk = (
         "🔴 DANGEROUS"  if entry.get("malicious", 0) > 0  else
         "🟡 SUSPICIOUS" if entry.get("suspicious", 0) > 0 else
         "🟢 CLEAN"
     )
+
     print(f"  Status   : {risk}")
     print(f"  Malicious: {entry.get('malicious',0)}  "
           f"Suspicious: {entry.get('suspicious',0)}  "
           f"Harmless: {entry.get('harmless',0)}  "
           f"Undetected: {entry.get('undetected',0)}  "
           f"(of {entry.get('total_vendors',0)} vendors)")
-    print(f"  VT scan  : {entry.get('last_vt_analysis','unknown')}  [{entry.get('source','?')}]")
+    print(f"  VT scan  : {entry.get('last_vt_analysis', 'unknown')}  "
+          f"[{entry.get('source', '?')}]")
+
     flagged = entry.get("flagged_by", {})
     if flagged:
         print(f"  Flagged by ({len(flagged)} vendors):")
@@ -304,7 +302,7 @@ def print_result(entry: dict):
 
 def print_summary(results: list[dict]):
     dangerous  = [r for r in results if r.get("malicious", 0) > 0]
-    suspicious = [r for r in results if not r.get("malicious") and r.get("suspicious", 0) > 0]
+    suspicious = [r for r in results if r.get("malicious", 0) == 0 and r.get("suspicious", 0) > 0]
     clean      = [r for r in results if not r.get("malicious") and not r.get("suspicious") and "error" not in r]
     errors     = [r for r in results if "error" in r]
 
@@ -315,68 +313,51 @@ def print_summary(results: list[dict]):
     print(f"  🟡 Suspicious : {len(suspicious)}")
     print(f"  🟢 Clean      : {len(clean)}")
     print(f"  ⚠️  Errors     : {len(errors)}")
+
     if dangerous:
         print(f"\n  Dangerous URLs:")
         for r in dangerous:
             print(f"    • {r['url']}  ({r.get('malicious',0)} vendors)")
+
     if suspicious:
         print(f"\n  Suspicious URLs:")
         for r in suspicious:
             print(f"    • {r['url']}  ({r.get('suspicious',0)} vendors)")
 
-# ─── Shared browser driver management ────────────────────────────────────────
-
-def _init_shared_drivers():
-    """
-    Pre-create Chrome drivers for every vendor module that supports
-    set_shared_driver(). Called once before the URL loop so the browser
-    is warm by the time the first appeal runs.
-
-    Returns a list of (module, driver) pairs for cleanup later.
-    """
-    pairs = []
-    for name, module in VENDOR_MODULES.items():
-        if not hasattr(module, "set_shared_driver"):
-            continue
-        if not hasattr(module, "_make_driver"):
-            continue
-        try:
-            print(f"  [DRIVER] Pre-warming Chrome for {name}...")
-            driver = module._make_driver(headless=False)
-            module.set_shared_driver(driver)
-            pairs.append((module, driver))
-            print(f"  [DRIVER] Chrome ready for {name}.")
-        except Exception as e:
-            print(f"  [DRIVER] Could not pre-warm {name}: {e}")
-    return pairs
-
-
-def _close_shared_drivers(pairs: list):
-    for module, _ in pairs:
-        if hasattr(module, "close_shared_driver"):
-            try:
-                module.close_shared_driver()
-            except Exception:
-                pass
-
 # ─── Appeal trigger ──────────────────────────────────────────────────────────
 
 def run_appeals(result: dict):
+    """
+    After a VT check, trigger appeal submissions for any flagging vendors
+    that have a matching module in VENDOR_MODULES.
+    """
     flagged_by = result.get("flagged_by", {})
     if not flagged_by:
         return
 
     url = result.get("url", "")
-    matched   = [(v, VENDOR_MODULES[v.lower()]) for v in flagged_by if v.lower() in VENDOR_MODULES]
-    unmatched = [v for v in flagged_by if v.lower() not in VENDOR_MODULES]
+
+    matched   = []
+    unmatched = []
+
+    for vendor in flagged_by:
+        module = VENDOR_MODULES.get(vendor.lower())
+        if module:
+            matched.append((vendor, module))
+        else:
+            unmatched.append(vendor)
 
     if not matched:
-        print(f"\n  [APPEAL] No modules for: {', '.join(unmatched)}")
+        print(f"\n  [APPEAL] No appeal modules active for flagging vendors:")
+        for v in unmatched:
+            print(f"    • {v}")
+        print(f"  [APPEAL] Enable vendor modules in vendors/__init__.py.")
         return
 
     print(f"\n  [APPEAL] Starting appeals for {len(matched)} vendor(s)...")
     if unmatched:
-        print(f"  [APPEAL] Skipping (no module): {', '.join(unmatched)}")
+        print(f"  [APPEAL] Skipping {len(unmatched)} vendor(s) with no active module: "
+              f"{', '.join(unmatched)}")
 
     for vendor, module in matched:
         print(f"\n  [APPEAL] ── Vendor: {vendor} ──")
@@ -402,23 +383,17 @@ def cmd_check_all():
     print(f"\n{'═'*60}")
     print(f"  VirusTotal URL Checker + Appeal Automation")
     print(f"  URLs to check   : {len(urls)}")
-    print(f"  Vendor modules  : {len(VENDOR_MODULES)}")
-    print(f"  Rate limit gap  : {RATE_LIMIT_SLEEP}s  |  Poll interval: {POLL_SLEEP}s")
+    print(f"  Active vendors  : {len(VENDOR_MODULES)}")
+    print(f"  Rate limit      : {RATE_LIMIT_SLEEP}s between API calls")
     print(f"{'═'*60}")
 
-    # Pre-warm Chrome drivers for all vendor modules before the URL loop
-    driver_pairs = _init_shared_drivers()
-
     results = []
-    try:
-        for i, url in enumerate(urls, 1):
-            print(f"\n[{i}/{len(urls)}]", end=" ")
-            result = check_url(url)
-            print_result(result)
-            results.append(result)
-            run_appeals(result)
-    finally:
-        _close_shared_drivers(driver_pairs)
+    for i, url in enumerate(urls, 1):
+        print(f"\n[{i}/{len(urls)}]", end=" ")
+        result = check_url(url)
+        print_result(result)
+        results.append(result)
+        run_appeals(result)
 
     print_summary(results)
 
@@ -428,14 +403,9 @@ def cmd_check_single(url: str):
     print(f"\n{'═'*60}")
     print(f"  VirusTotal URL Checker — Single URL")
     print(f"{'═'*60}")
-
-    driver_pairs = _init_shared_drivers()
-    try:
-        result = check_url(url)
-        print_result(result)
-        run_appeals(result)
-    finally:
-        _close_shared_drivers(driver_pairs)
+    result = check_url(url)
+    print_result(result)
+    run_appeals(result)
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
