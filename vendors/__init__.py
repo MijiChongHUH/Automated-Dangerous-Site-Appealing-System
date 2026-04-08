@@ -35,11 +35,11 @@ Add similar keys for each new vendor you create.
 
 # ── Import (enable) or comment-out (disable) vendors below ───────────────────
 
-from vendors import alphamountain
+# from vendors import alphamountain
 # from vendors import emsisoft
 # from vendors import cyradar
 # from vendors import fortinet
-# from vendors import netcraft
+from vendors import netcraft
 # from vendors import seclookup
 # from vendors import webroot
 
@@ -61,15 +61,15 @@ def _register(module):
     else:
         print(f"  [VENDOR] WARNING : {module.__name__} has no VENDOR_NAME — skipped.")
 
-# Register every module that was imported above
+# Register every module that was imported aboveAAA
 _enabled_modules = [
-    alphamountain,
+    # alphamountain,
     # emsisoft,
     # cyradar,
     # fortinet,
-    # netcraft,
+    netcraft
     # seclookup,
-    # webroot,
+    # webroot
 ]
 
 for _mod in _enabled_modules:
