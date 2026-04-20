@@ -39,10 +39,10 @@ Add similar keys for each new vendor you create.
 # from vendors import emsisoft
 # from vendors import cyradar
 # from vendors import lionic
-# from vendors import fortinet
+from vendors import fortinet
 # from vendors import netcraft
 # from vendors import seclookup
-from vendors import webroot
+# from vendors import webroot
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Registry — maps VT vendor name (lower-case) → module object.
@@ -69,8 +69,8 @@ _enabled_modules = [
     # cyradar,
     # lionic,
     # netcraft,
-    webroot
-    # fortinet,
+    # webroot,
+    fortinet
     # seclookup
 ]
 
