@@ -5,6 +5,8 @@ import base64
 import argparse
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -37,13 +39,53 @@ def _require_env(key: str) -> str:
 API_KEY          = _require_env("VT_API_KEY")
 BASE_URL         = _require_env("VT_BASE_URL")
 URLS_FILE        = os.getenv("URLS_FILE", "urls.json")
-CACHE_MAX_AGE    = timedelta(hours=int(os.getenv("CACHE_MAX_AGE_HOURS", "24")))
-RATE_LIMIT_SLEEP = 5.5  # seconds between API calls
+CACHE_MAX_AGE    = timedelta(hours=int(os.getenv("CACHE_MAX_AGE_HOURS", "168")))  # 7 days (168 hours) default
+NO_WAIT_MODE     = os.getenv("NO_WAIT_MODE", "false").lower() == "true"  # Submit and don't wait for results
+STRICT_RATE_LIMIT = os.getenv("STRICT_RATE_LIMIT", "false").lower() == "true"  # Only enforce rate limit on concurrent
 
 HEADERS = {
     "x-apikey": API_KEY,
     "Accept":   "application/json",
 }
+
+# ─── Rate Limiter ───────────────────────────────────────────────────────────
+
+class RateLimiter:
+    """Thread-safe rate limiter for VirusTotal API calls."""
+    def __init__(self, calls_per_minute: int = 4):
+        self.calls_per_minute = calls_per_minute
+        self.interval = 60.0 / calls_per_minute
+        self.last_call = 0.0
+        self.lock = threading.Lock()
+
+    def wait_if_needed(self, skip_on_first: bool = False):
+        """Wait until it's safe to make another API call.
+        
+        Args:
+            skip_on_first: If True, skip rate limiting on first call (no prior activity).
+        """
+        with self.lock:
+            # Skip rate limiting if this is the first call and skip_on_first is True
+            if skip_on_first and self.last_call == 0.0:
+                self.last_call = time.time()
+                return
+            
+            # Only enforce strict rate limiting if configured or multiple concurrent tasks
+            if not STRICT_RATE_LIMIT:
+                self.last_call = time.time()
+                return
+            
+            # Strict rate limiting (for concurrent mode)
+            now = time.time()
+            time_since_last = now - self.last_call
+            if time_since_last < self.interval:
+                sleep_time = self.interval - time_since_last
+                print(f"  [RATE] Respecting VT 4 req/min limit (~{sleep_time:.1f}s)...")
+                time.sleep(sleep_time)
+            self.last_call = time.time()
+
+# Global rate limiter instance
+rate_limiter = RateLimiter(calls_per_minute=4)
 
 # ─── Vendor appeal registry ───────────────────────────────────────────────────
 # Loaded from vendors/__init__.py — edit that file to enable/disable vendors.
@@ -95,14 +137,30 @@ def url_to_id_variants(url: str) -> list:
     return [url_to_id(v) for v in variants]
 
 
-def wait():
-    """Sleep between API calls to respect the 4 req/min free tier limit."""
-    print(f"  [RATE] Waiting {RATE_LIMIT_SLEEP}s before next API call...")
-    time.sleep(RATE_LIMIT_SLEEP)
+def wait(skip_first: bool = False):
+    """Rate limit API calls using the global rate limiter.
+    
+    Args:
+        skip_first: If True, skip rate limiting on the very first API call.
+    """
+    rate_limiter.wait_if_needed(skip_on_first=skip_first)
 
 
 def is_within_24h(timestamp_str: str) -> bool:
     """Return True if the ISO timestamp is within the last 24 hours."""
+    if not timestamp_str:
+        return False
+    try:
+        ts = datetime.fromisoformat(timestamp_str)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - ts) < timedelta(hours=24)
+    except Exception:
+        return False
+
+
+def is_within_cache_age(timestamp_str: str) -> bool:
+    """Return True if the ISO timestamp is within the cache age window."""
     if not timestamp_str:
         return False
     try:
@@ -144,7 +202,7 @@ def parse_analysis(attributes: dict) -> dict:
 
 # ─── API calls ────────────────────────────────────────────────────────────────
 
-def fetch_report(url: str) -> dict | None:
+def fetch_report(url: str, is_first_call: bool = False) -> dict | None:
     """
     GET /urls/{id} — fetch VT's stored report for a URL.
     Tries all ID variants so bare domains are handled correctly.
@@ -154,7 +212,8 @@ def fetch_report(url: str) -> dict | None:
 
     for url_id in ids:
         resp = requests.get(f"{BASE_URL}/urls/{url_id}", headers=HEADERS, timeout=20)
-        wait()
+        wait(skip_first=is_first_call)
+        is_first_call = False  # Only skip rate limit on truly first call
 
         if resp.status_code == 200:
             attrs = resp.json().get("data", {}).get("attributes", {})
@@ -186,17 +245,36 @@ def submit_url(url: str) -> str | None:
     return None
 
 
-def poll_analysis(analysis_id: str) -> dict | None:
-    """GET /analyses/{id} — poll until completed (max 6 attempts)."""
-    for attempt in range(1, 7):
-        print(f"  [API] Polling result (attempt {attempt}/6)...")
-        time.sleep(10)
+def poll_analysis(analysis_id: str, timeout_secs: int = 60) -> dict | None:
+    """GET /analyses/{id} — poll until completed with exponential backoff.
+    
+    Args:
+        analysis_id: The VT analysis ID to poll.
+        timeout_secs: Maximum time to wait for results (default 60s).
+    """
+    base_wait = 5  # Start with 5 seconds
+    max_attempts = min(8, max(3, (timeout_secs // 5)))  # Adaptive attempts based on timeout
+    start_time = time.time()
+
+    for attempt in range(1, max_attempts + 1):
+        wait_time = min(base_wait * (2 ** (attempt - 1)), 60)  # Exponential backoff, max 60s
+        
+        # Check if we'd exceed timeout
+        if time.time() - start_time + wait_time > timeout_secs:
+            print(f"  [API] Polling timeout ({timeout_secs}s) approaching, stopping.")
+            break
+        
+        print(f"  [API] Polling result (attempt {attempt}/{max_attempts}, waiting {wait_time}s)...")
+        time.sleep(wait_time)
+
         resp = requests.get(
             f"{BASE_URL}/analyses/{analysis_id}",
             headers=HEADERS,
             timeout=20,
         )
-        wait()
+        # Only wait between requests, not after the last one
+        if attempt < max_attempts:
+            wait()
 
         if resp.status_code != 200:
             continue
@@ -225,18 +303,24 @@ def poll_analysis(analysis_id: str) -> dict | None:
                 **stats,
             }
 
-    print(f"  [WARN] Polling timed out after 6 attempts.")
+    print(f"  [WARN] Polling timed out after {max_attempts} attempts.")
     return None
 
 # ─── Core checker ─────────────────────────────────────────────────────────────
 
-def check_url(url: str) -> dict:
-    """Check a single URL against VirusTotal."""
+def check_url(url: str, wait_for_results: bool = True) -> dict:
+    """Check a single URL against VirusTotal with optimized scanning.
+    
+    Args:
+        url: URL to check.
+        wait_for_results: If False, submit and return immediately (NO_WAIT_MODE).
+    """
     url = url.strip().rstrip("/")
     print(f"\n{'─'*60}")
     print(f"Checking: {url}")
 
-    report = fetch_report(url)
+    # First API call - can skip rate limit on very first check if NO_WAIT_MODE
+    report = fetch_report(url, is_first_call=(NO_WAIT_MODE or not wait_for_results))
 
     if report and is_within_24h(report.get("last_vt_analysis")):
         print(f"  [OK] VT report is fresh (within 24h), using it.")
@@ -244,22 +328,43 @@ def check_url(url: str) -> dict:
         report["source"] = "existing_report"
         return report
 
+    # Check if we should use cached report
+    if report and is_within_cache_age(report.get("last_vt_analysis")):
+        cache_hours = int(CACHE_MAX_AGE.total_seconds()/3600)
+        print(f"  [OK] VT report is within cache window ({cache_hours}h), using it.")
+        report["url"]    = url
+        report["source"] = "cached_report"
+        return report
+    
     if report:
-        print(f"  [STALE] VT report is older than 24h — submitting for rescan...")
+        print(f"  [STALE] VT report is older than cache window — submitting for rescan...")
     else:
-        print(f"  [NEW] URL not in VT database — submitting for first scan...")
+        print(f"  [NEW] URL not in VT database — submitting for scan...")
 
     analysis_id = submit_url(url)
     if not analysis_id:
         return {"url": url, "error": "Failed to submit URL for scanning"}
 
-    result = poll_analysis(analysis_id)
+    # NO_WAIT_MODE: submit and return immediately
+    if NO_WAIT_MODE or not wait_for_results:
+        print(f"  [SUBMITTED] Scan submitted (NO_WAIT_MODE - not waiting for results)")
+        return {
+            "url": url,
+            "source": "submitted_pending",
+            "status": "pending",
+            "analysis_id": analysis_id,
+            "note": "Scan submitted. Results will be available later."
+        }
+
+    # Normal mode: wait for results with shorter timeout
+    result = poll_analysis(analysis_id, timeout_secs=45)
     if result:
         result["url"]    = url
         result["source"] = "fresh_scan"
         return result
 
     print(f"  [FALLBACK] Trying to fetch report after scan submission...")
+    time.sleep(5)  # Reduced from 30s
     report = fetch_report(url)
     if report:
         report["url"]    = url
@@ -380,22 +485,53 @@ def cmd_check_all():
 
     _load_vendor_modules()
 
+    # Check if concurrent processing is enabled
+    concurrent = os.getenv("CONCURRENT_CHECKING", "false").lower() == "true"
+    max_workers = min(int(os.getenv("MAX_WORKERS", "2")), len(urls))
+
     print(f"\n{'═'*60}")
     print(f"  VirusTotal URL Checker + Appeal Automation")
     print(f"  URLs to check   : {len(urls)}")
     print(f"  Active vendors  : {len(VENDOR_MODULES)}")
-    print(f"  Rate limit      : {RATE_LIMIT_SLEEP}s between API calls")
+    print(f"  Rate limit      : 4 calls/minute")
+    print(f"  Cache age       : {CACHE_MAX_AGE}")
+    if concurrent:
+        print(f"  Concurrent      : Yes (max {max_workers} workers)")
+    else:
+        print(f"  Concurrent      : No (sequential)")
     print(f"{'═'*60}")
 
-    results = []
-    for i, url in enumerate(urls, 1):
-        print(f"\n[{i}/{len(urls)}]", end=" ")
-        result = check_url(url)
-        print_result(result)
-        results.append(result)
-        run_appeals(result)
+    if concurrent and len(urls) > 1:
+        results = check_urls_concurrent(urls, max_workers)
+    else:
+        results = []
+        for i, url in enumerate(urls, 1):
+            print(f"\n[{i}/{len(urls)}]", end=" ")
+            result = check_url(url)
+            print_result(result)
+            results.append(result)
+            run_appeals(result)
 
     print_summary(results)
+
+
+def check_urls_concurrent(urls: list[str], max_workers: int) -> list[dict]:
+    """Check multiple URLs concurrently with coordinated rate limiting."""
+    results = [None] * len(urls)  # Pre-allocate to maintain order
+
+    def check_single_with_index(index: int, url: str):
+        print(f"\n[{index+1}/{len(urls)}] Checking: {url}")
+        result = check_url(url)
+        print_result(result)
+        run_appeals(result)
+        results[index] = result
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(check_single_with_index, i, url) for i, url in enumerate(urls)]
+        for future in as_completed(futures):
+            future.result()  # Wait for all to complete
+
+    return results
 
 
 def cmd_check_single(url: str):
