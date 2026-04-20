@@ -38,8 +38,9 @@ Add similar keys for each new vendor you create.
 # from vendors import alphamountain
 # from vendors import emsisoft
 # from vendors import cyradar
+from vendors import lionic
 # from vendors import fortinet
-from vendors import netcraft
+# from vendors import netcraft
 # from vendors import seclookup
 # from vendors import webroot
 
@@ -66,8 +67,9 @@ _enabled_modules = [
     # alphamountain,
     # emsisoft,
     # cyradar,
+    lionic
     # fortinet,
-    netcraft
+    # netcraft,
     # seclookup,
     # webroot
 ]
