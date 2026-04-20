@@ -11,11 +11,10 @@ which reveals the VirusTotal false positive fields.
 Workflow (same as cyradar.py):
   1. Open the page in a visible Chrome window.
   2. Accept the cookie banner if present.
-  3. Select the radio button if present (for form type selection).
-  4. Fill all visible fields automatically, including the required Subject field.
-  5. Check the privacy policy checkbox.
-  6. Auto-click the "Submit Only" button (Lionic has no CAPTCHA).
-  7. Detects the success response and confirms in the terminal.
+  3. Select the "AntiVirus-VT" radio button → reveals the correct sub-form.
+  4. Fill all visible fields automatically.
+  5. Auto-clicks the Submit button (no CAPTCHA on Lionic).
+  6. Detects the success response and confirms in the terminal.
 
 Vendor name in VirusTotal: "Lionic"
 
@@ -35,9 +34,9 @@ template.json keys used
 
 import json
 import time
+import random
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
 
 try:
     from selenium import webdriver
@@ -62,7 +61,7 @@ except ImportError:
 
 VENDOR_NAME    = "Lionic"
 FORM_URL       = "https://www.lionic.com/supports/report-false-positive/"
-RADIO_VALUE    = "Website-VT"     # the radio button value to select
+RADIO_VALUE    = "AntiVirus-VT"     # the radio button value to select
 TEMPLATE       = json.loads(Path("template.json").read_text())
 USER_WAIT_SECS = 120              # seconds to wait for user to click Submit
 
@@ -94,13 +93,20 @@ def _build_driver() -> webdriver.Chrome:
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1280,900")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+    opts.add_experimental_option("useAutomationExtension", False)
     opts.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     )
     service = Service(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=opts)
+    driver = webdriver.Chrome(service=service, options=opts)
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
+    return driver
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -121,11 +127,13 @@ def _ensure_scheme(url: str) -> str:
 
 
 def _build_subject(domain: str) -> str:
-    tpl = TEMPLATE.get("subject_template", "False Positive Report: {domain}")
+    tpl = TEMPLATE.get("lionic_subject_template",
+                        TEMPLATE.get("subject_template",
+                                     "False Positive Report: {domain}"))
     return tpl.format(domain=domain)
 
 
-def _build_body(domain: str, flagged_by: Dict[str, str]) -> str:
+def _build_body(domain: str, flagged_by: dict) -> str:
     detection_types = list(flagged_by.values()) if flagged_by else ["Malicious"]
     detection_str   = " / ".join(sorted(set(d.capitalize() for d in detection_types)))
     date_flagged    = datetime.now().strftime("%m/%d/%Y")
@@ -218,7 +226,7 @@ def _dismiss_cookies(driver):
 
 # ─── Core fill logic ──────────────────────────────────────────────────────────
 
-def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> bool:
+def _fill_form(driver, domain: str, flagged_by: dict, debug: bool) -> bool:
     wait = WebDriverWait(driver, 25)
 
     print(f"  [APPEAL] Loading form: {FORM_URL}")
@@ -232,6 +240,15 @@ def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> 
         print(f"  [APPEAL] ❌  Page did not load in time.")
         return False
 
+    # Brief realistic pause — lets reCAPTCHA v3 observe page interaction
+    time.sleep(random.uniform(1.5, 2.5))
+
+    # Add human-like scrolling and mouse movement to improve reCAPTCHA score
+    driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 4);")
+    time.sleep(random.uniform(0.5, 1.0))
+    driver.execute_script("window.scrollTo(0, 0);")
+    time.sleep(random.uniform(0.5, 1.0))
+
     # Dismiss cookie banner if present
     _dismiss_cookies(driver)
 
@@ -239,8 +256,8 @@ def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> 
         print(f"  [DEBUG] Title: {driver.title}")
         _print_all_fields(driver)
 
-    # ── Step 1: Select the radio button if it exists ──────────────────────────
-    print(f"  [APPEAL] 🔘  Checking for radio: form_type = '{RADIO_VALUE}'...")
+    # ── Step 1: Select the AntiVirus-VT radio button ──────────────────────────
+    print(f"  [APPEAL] 🔘  Selecting radio: form_type = '{RADIO_VALUE}'...")
     radio = _safe_find(
         driver,
         f"input[type='radio'][name='form_type'][value='{RADIO_VALUE}']"
@@ -249,12 +266,19 @@ def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> 
         # Fallback: find by value only
         radio = _safe_find(driver, f"input[value='{RADIO_VALUE}']")
 
-    if radio:
-        _safe_click(driver, radio)
-        print(f"  [APPEAL] ✅  Radio button selected.")
-        time.sleep(2)   # wait for the sub-form to reveal itself
-    else:
-        print(f"  [APPEAL] ℹ️   Radio button (form_type='{RADIO_VALUE}') not found — continuing without selection.")
+    if not radio:
+        print(f"  [APPEAL] ❌  Radio button (form_type='{RADIO_VALUE}') not found.")
+        if not debug:
+            print(f"  [APPEAL]     Re-run with debug=True to inspect all fields.")
+        return False
+
+    _safe_click(driver, radio)
+    print(f"  [APPEAL] ✅  Radio button selected.")
+    time.sleep(random.uniform(2.0, 3.0))   # wait for the sub-form to reveal itself
+
+    # Scroll to form area after radio selection
+    driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
+    time.sleep(random.uniform(0.5, 1.0))
 
     if debug:
         print(f"  [DEBUG] Fields after radio selection:")
@@ -282,9 +306,9 @@ def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> 
         ], url_with_scheme),
 
         ("Subject", [
-            "input[name='subject']",
             "input[name='title']",
-            "input[placeholder*='subject' i]",
+            "input[name='subject']",
+            "input[placeholder*='Title' i]",
             "input[placeholder*='Subject' i]",
         ], subject),
 
@@ -325,8 +349,13 @@ def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> 
         ], body),
     ]
 
+    # Randomize field filling order to appear more human-like
+    field_indices = list(range(len(fields)))
+    random.shuffle(field_indices)
+
     filled_any = False
-    for label, selectors, value in fields:
+    for idx in field_indices:
+        label, selectors, value = fields[idx]
         el = None
         for sel in selectors:
             el = _safe_find(driver, sel)
@@ -335,14 +364,20 @@ def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> 
         if el:
             try:
                 el.clear()
-                el.send_keys(value)
+                time.sleep(random.uniform(0.3, 0.8))  # Random pause before typing
+                # Type character by character for human-like input
+                for char in value:
+                    el.send_keys(char)
+                    time.sleep(random.uniform(0.05, 0.15))  # Slightly longer random delays
                 display_val = value if len(value) <= 60 else f"({len(value)} chars)"
                 print(f"  [APPEAL] ✏️   {label:<22}: {display_val}")
                 filled_any = True
+                # Pause between fields
+                time.sleep(random.uniform(0.5, 1.5))
             except Exception as e:
                 print(f"  [APPEAL] ⚠️   Could not fill {label}: {e}")
         else:
-            # URL, Email, and Subject are critical — warn loudly
+            # URL and Email are critical — warn loudly
             if label in ("URL", "Email", "Subject"):
                 print(f"  [APPEAL] ⚠️   {label} field not found — may affect submission.")
             else:
@@ -352,52 +387,38 @@ def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> 
         print(f"  [APPEAL] ❌  No fields could be filled. Run with debug=True.")
         return False
 
-    # ── Step 3: Check privacy policy checkbox ────────────────────────────────
-    print(f"  [APPEAL] ☑️   Checking privacy policy checkbox...")
-    privacy_checkbox = _safe_find(driver, "input[name='policy_allowed']")
-    if privacy_checkbox:
-        if not privacy_checkbox.is_selected():
-            _safe_click(driver, privacy_checkbox)
-            print(f"  [APPEAL] ✅  Privacy policy checkbox checked.")
-        else:
-            print(f"  [APPEAL] ℹ️   Privacy policy checkbox already checked.")
-    else:
-        print(f"  [APPEAL] ⚠️   Privacy policy checkbox not found — may affect submission.")
+    # Scroll to submit area after filling
+    driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.75);")
+    time.sleep(random.uniform(0.5, 1.0))
 
-    # ── Step 4: Auto-click submit ─────────────────────────────────────────────
-    # Lionic has no CAPTCHA — submit button can be clicked automatically.
-    # Prefer "Submit Only" button over "Submit and Subscribe"
+    # ── Step 3: Scroll "Submit Only" button into view, prompt user ──────────
+    # reCAPTCHA v3 scores too low for automated click — user clicks manually.
     submit_btn = None
-    # First, try to find "Submit Only" button
     for btn in driver.find_elements(By.TAG_NAME, "button"):
-        if "submit only" in btn.text.lower().strip():
+        if "submit only" in (btn.text or "").lower().strip():
             submit_btn = btn
             break
-    for inp in driver.find_elements(By.TAG_NAME, "input"):
-        if inp.get_attribute("type") == "submit" and "submit only" in (inp.get_attribute("value") or "").lower():
-            submit_btn = inp
-            break
-    
-    # Fallback to any submit button
     if not submit_btn:
         submit_btn = (
             _safe_find(driver, "button[type='submit']") or
             _safe_find(driver, "input[type='submit']") or
-            _safe_find(driver, "button.btn-primary") or
-            _safe_find(driver, "button.submit")
+            _safe_find(driver, "button.btn-primary")
         )
-    if not submit_btn:
-        print(f"  [APPEAL] ❌  Submit button not found — aborting.")
-        return False
+    if submit_btn:
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", submit_btn)
 
-    print(f"  [APPEAL] 🖱️   Clicking submit automatically...")
+    print(f"")
+    print(f"  [APPEAL] ✅  Form filled. Browser window is ready.")
+    print(f"  [APPEAL] 👉  Please click the SUBMIT ONLY button in the browser now.")
+    print(f"  [APPEAL]     Waiting up to {USER_WAIT_SECS}s for you to submit...")
+    print(f"")
+
     initial_url = driver.current_url
-    _safe_click(driver, submit_btn)
 
     # ── Step 4: Detect success ────────────────────────────────────────────────
     print(f"  [APPEAL] ⏳  Waiting for success response...")
 
-    end_time = time.time() + 20
+    end_time = time.time() + USER_WAIT_SECS
     while time.time() < end_time:
         time.sleep(1)
 
@@ -406,8 +427,12 @@ def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> 
             if any(kw in current_url.lower() for kw in ("thank", "success", "sent", "complete")):
                 print(f"  [APPEAL] ✅  Redirected to success page: {current_url}")
                 return True
-            print(f"  [APPEAL] ✅  Page navigated after submission: {current_url}")
-            return True
+            # URL changed but no success keyword — wait 2s to confirm it settled
+            time.sleep(2)
+            settled_url = driver.current_url
+            if settled_url != initial_url:
+                print(f"  [APPEAL] ✅  Page navigated after submission: {settled_url}")
+                return True
 
         try:
             body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
@@ -439,12 +464,12 @@ def _fill_form(driver, domain: str, flagged_by: Dict[str, str], debug: bool) -> 
 
 # ─── Main entry ───────────────────────────────────────────────────────────────
 
-def submit(url: str, flagged_by: Dict[str, str], headless: bool = False, debug: bool = False) -> bool:
+def submit(url: str, flagged_by: dict, headless: bool = False, debug: bool = False) -> bool:
     """
     Submit a false positive report to Lionic via their web form.
 
     Selects the AntiVirus-VT radio button, fills all fields automatically,
-    auto-clicks Submit (Lionic has no CAPTCHA).
+    then waits for the user to click Submit Only (bypasses reCAPTCHA).
 
     Args:
         url        : The domain/URL being appealed.
@@ -461,9 +486,9 @@ def submit(url: str, flagged_by: Dict[str, str], headless: bool = False, debug: 
     own_driver = False
     driver     = _shared_driver
 
-    print(f"\n  [APPEAL] ── Lionic (Selenium / auto-submit) : {domain} ──")
+    print(f"\n  [APPEAL] ── Lionic (Selenium / manual send) : {domain} ──")
     print(f"  [APPEAL] Form URL : {FORM_URL}")
-    print(f"  [APPEAL] Mode     : Auto-fill + Auto-submit")
+    print(f"  [APPEAL] Mode     : Auto-fill → User clicks Submit Only")
 
     try:
         if driver is None:
@@ -475,7 +500,7 @@ def submit(url: str, flagged_by: Dict[str, str], headless: bool = False, debug: 
 
         if ok:
             print(f"  [APPEAL] Done for: {domain}")
-            time.sleep(3)   # let user see the success page before browser closes
+            time.sleep(8)   # give user time to see the success page before browser closes
         else:
             print(f"  [APPEAL] ❌  Failed or timed out for: {domain}")
 
