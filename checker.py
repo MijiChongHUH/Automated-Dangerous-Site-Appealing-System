@@ -38,7 +38,7 @@ API_KEY          = _require_env("VT_API_KEY")
 BASE_URL         = _require_env("VT_BASE_URL")
 URLS_FILE        = os.getenv("URLS_FILE", "urls.json")
 CACHE_MAX_AGE    = timedelta(hours=int(os.getenv("CACHE_MAX_AGE_HOURS", "24")))
-RATE_LIMIT_SLEEP = 8.5  # seconds between API calls
+RATE_LIMIT_SLEEP = 5.5  # seconds between API calls
 
 HEADERS = {
     "x-apikey": API_KEY,
