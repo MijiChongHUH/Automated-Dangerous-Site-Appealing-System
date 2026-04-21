@@ -1,3 +1,6 @@
+# This is the updated checker.py
+from vendors.email_sender import send_false_positive_emails
+import vendors as _vendors_pkg   # already imported via _load_vendor_modules()
 import json
 import time
 import hashlib
@@ -42,7 +45,7 @@ URLS_FILE        = os.getenv("URLS_FILE", "urls.json")
 CACHE_MAX_AGE    = timedelta(hours=int(os.getenv("CACHE_MAX_AGE_HOURS", "168")))  # 7 days (168 hours) default
 NO_WAIT_MODE     = os.getenv("NO_WAIT_MODE", "false").lower() == "true"  # Submit and don't wait for results
 STRICT_RATE_LIMIT = os.getenv("STRICT_RATE_LIMIT", "false").lower() == "true"  # Only enforce rate limit on concurrent
-
+POLL_TIMEOUT_SECS = int(os.getenv("POLL_TIMEOUT_SECS", "120"))  # Default 2 minutes
 HEADERS = {
     "x-apikey": API_KEY,
     "Accept":   "application/json",
@@ -356,8 +359,8 @@ def check_url(url: str, wait_for_results: bool = True) -> dict:
             "note": "Scan submitted. Results will be available later."
         }
 
-    # Normal mode: wait for results with shorter timeout
-    result = poll_analysis(analysis_id, timeout_secs=45)
+    # Normal mode: wait for results with configurable timeout
+    result = poll_analysis(analysis_id, timeout_secs=POLL_TIMEOUT_SECS)
     if result:
         result["url"]    = url
         result["source"] = "fresh_scan"
@@ -513,6 +516,15 @@ def cmd_check_all():
             run_appeals(result)
 
     print_summary(results)
+
+    # ── Email sender — controlled by EMAIL_SENDER_ENABLED in vendors/__init__.py
+    email_enabled = getattr(_vendors_pkg, "EMAIL_SENDER_ENABLED", False)
+    if email_enabled:
+        send_false_positive_emails(results)
+    else:
+        print(f"\n  [EMAIL] Email sender is DISABLED.")
+        print(f"          Set EMAIL_SENDER_ENABLED = True in vendors/__init__.py to enable.")
+
 
 
 def check_urls_concurrent(urls: list[str], max_workers: int) -> list[dict]:

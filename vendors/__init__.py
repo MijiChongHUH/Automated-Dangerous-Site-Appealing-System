@@ -30,6 +30,12 @@ Per-vendor keys (only needed if the vendor is enabled):
   emsisoft_subject_template        — e.g. "False Positive: {domain}"
   emsisoft_body_template           — full message body, same placeholders
 
+  cyradar_body_template            — message body for CyRadar CF7 form
+  lionic_body_template             — message body for Lionic form
+  fortiguard_body_template         — comment body for FortiGuard form
+  webroot_subject_template         — subject for Webroot support ticket
+  webroot_body_template            — message body for Webroot support ticket
+
 Add similar keys for each new vendor you create.
 """
 
@@ -39,10 +45,14 @@ Add similar keys for each new vendor you create.
 # from vendors import emsisoft
 # from vendors import cyradar
 # from vendors import lionic
-from vendors import fortinet
+# from vendors import fortinet
 # from vendors import netcraft
-# from vendors import seclookup
 # from vendors import webroot
+
+# ── Email sender — set to True to enable, False to disable ───────────────────
+# When enabled, checker.py will send one email per vendor after all VT checks.
+# Vendors receiving emails are configured in vendors/email_sender.py VENDOR_EMAILS.
+EMAIL_SENDER_ENABLED = True
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Registry — maps VT vendor name (lower-case) → module object.
@@ -54,6 +64,7 @@ import sys as _sys
 
 VENDOR_MODULES: dict = {}
 
+
 def _register(module):
     """Register a vendor module using its VENDOR_NAME attribute."""
     name = getattr(module, "VENDOR_NAME", None)
@@ -62,16 +73,16 @@ def _register(module):
     else:
         print(f"  [VENDOR] WARNING : {module.__name__} has no VENDOR_NAME — skipped.")
 
-# Register every module that was imported aboveAAA
+
+# Register every module that was imported above
 _enabled_modules = [
     # alphamountain,
     # emsisoft,
     # cyradar,
     # lionic,
+    # fortinet,
     # netcraft,
-    # webroot,
-    fortinet
-    # seclookup
+    # webroot
 ]
 
 for _mod in _enabled_modules:
@@ -81,3 +92,4 @@ for _mod in _enabled_modules:
 print(f"  [VENDOR] Active vendors  : {len(VENDOR_MODULES)}")
 for _vname in VENDOR_MODULES:
     print(f"  [VENDOR]   • {_vname}")
+print(f"  [VENDOR] Email sender    : {'ENABLED' if EMAIL_SENDER_ENABLED else 'DISABLED'}")
