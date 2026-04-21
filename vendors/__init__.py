@@ -48,11 +48,12 @@ Add similar keys for each new vendor you create.
 # from vendors import fortinet
 # from vendors import netcraft
 # from vendors import webroot
+from vendors import crdf
 
 # ── Email sender — set to True to enable, False to disable ───────────────────
 # When enabled, checker.py will send one email per vendor after all VT checks.
 # Vendors receiving emails are configured in vendors/email_sender.py VENDOR_EMAILS.
-EMAIL_SENDER_ENABLED = True
+EMAIL_SENDER_ENABLED = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Registry — maps VT vendor name (lower-case) → module object.
@@ -82,7 +83,8 @@ _enabled_modules = [
     # lionic,
     # fortinet,
     # netcraft,
-    # webroot
+    # webroot,
+    crdf
 ]
 
 for _mod in _enabled_modules:

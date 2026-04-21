@@ -76,8 +76,16 @@ _CLIENT_CONFIG = {
 # Value = recipient email address
 
 VENDOR_EMAILS = {
-    "seclookup":  "info@seclookup.com",
-    "adminus":     "falsepositive@adminuslabs.net",
+    "Seclookup":  "info@seclookup.com",
+    "Adminus":     "falsepositive@adminuslabs.net",
+    "Chong Lua Dao": "info@chongluadao.vn",
+    "Forcepoint": "reviewmysite@forcepoint.com",
+    "BitDefender": "virus_submission@bitdefender.com",
+    "Sophos": "samples@sophos.com",
+    "ESET": "samples@eset.com",
+    "Rising": "fp@rising.com.cn",
+    "Vipre": "productsupport@vipre.com",
+    "Acronis": "virustotal-falsepositive@acronis.com"
     # Add more vendors here as needed
 }
 
