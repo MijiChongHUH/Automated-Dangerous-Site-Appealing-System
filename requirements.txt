@@ -1,0 +1,15 @@
+# ─── Core ─────────────────────────────────────────────────────────────────────
+requests
+python-dotenv
+ 
+# ─── Selenium (browser automation for vendor form submissions) ─────────────────
+selenium
+webdriver-manager
+undetected-chromedriver
+ 
+# ─── Gmail API (email_sender.py) ──────────────────────────────────────────────
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+ 
