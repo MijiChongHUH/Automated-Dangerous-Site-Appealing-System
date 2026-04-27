@@ -41,13 +41,13 @@ Add similar keys for each new vendor you create.
 
 # ── Import (enable) or comment-out (disable) vendors below ───────────────────
 
-from vendors import alphamountain
-from vendors import emsisoft
-from vendors import cyradar
-from vendors import lionic
-from vendors import fortinet
-from vendors import netcraft
-from vendors import webroot
+# from vendors import alphamountain
+# from vendors import emsisoft
+# from vendors import cyradar
+# from vendors import lionic
+# from vendors import fortinet
+# from vendors import netcraft
+# from vendors import webroot
 # from vendors import crdf
 
 # ── Email sender — set to True to enable, False to disable ───────────────────
@@ -77,13 +77,13 @@ def _register(module):
 
 # Register every module that was imported above
 _enabled_modules = [
-    alphamountain,
-    emsisoft,
-    cyradar,
-    lionic,
-    fortinet,
-    netcraft,
-    webroot
+    # alphamountain,
+    # emsisoft,
+    # cyradar,
+    # lionic,
+    # fortinet,
+    # netcraft,
+    # webroot
     # crdf
 ]
 

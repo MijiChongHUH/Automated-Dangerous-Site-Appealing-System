@@ -76,16 +76,28 @@ _CLIENT_CONFIG = {
 # Value = recipient email address
 
 VENDOR_EMAILS = {
-    "Seclookup":  "info@seclookup.com",
-    "Adminus":     "falsepositive@adminuslabs.net",
-    "Chong Lua Dao": "info@chongluadao.vn",
-    "Forcepoint": "reviewmysite@forcepoint.com",
-    "BitDefender": "virus_submission@bitdefender.com",
-    "Sophos": "samples@sophos.com",
-    "ESET": "samples@eset.com",
-    "Rising": "fp@rising.com.cn",
-    "Vipre": "productsupport@vipre.com",
-    "Acronis": "virustotal-falsepositive@acronis.com"
+    "seclookup":  "info@seclookup.com",
+    "adminus":     "falsepositive@adminuslabs.net",
+    "adminuslabs": "falsepositive@adminuslabs.net",
+    "chong lua dao": "info@chongluadao.vn",
+    "forcepoint": "reviewmysite@forcepoint.com",
+    "forcepoint threatseeker": "reviewmysite@forcepoint.com",
+    "bitdefender": "virus_submission@bitdefender.com",
+    "sophos": "samples@sophos.com",
+    "eset": "samples@eset.com",
+    "rising": "fp@rising.com.cn",
+    "vipre": "productsupport@vipre.com",
+    "acronis": "virustotal-falsepositive@acronis.com",
+    "emsisoft": "support@emsisoft.com",
+    "g-data": "falsepositive@g-data.com",
+    "netcraft": "phishing@netcraft.com",
+    "lionic": "support@lionic.com",
+    "alpha mountain": "contact@alphamountain.ai",
+    "alphamountain": "contact@alphamountain.ai",
+    "crdf": "report@crdf.com",
+    "bfore": "report@bfore.ai",
+    "bfore ai": "report@bfore.ai",
+    "lionic": "support@lionic.com"
     # Add more vendors here as needed
 }
 
