@@ -1,7 +1,8 @@
 # ─── Core ─────────────────────────────────────────────────────────────────────
 requests
 python-dotenv
- 
+pyperclip
+
 # ─── Selenium (browser automation for vendor form submissions) ─────────────────
 selenium
 webdriver-manager
