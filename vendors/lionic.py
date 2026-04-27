@@ -61,7 +61,7 @@ except ImportError:
 
 VENDOR_NAME    = "Lionic"
 FORM_URL       = "https://www.lionic.com/supports/report-false-positive/"
-RADIO_VALUE    = "AntiVirus-VT"     # the radio button value to select
+RADIO_VALUE    = "Website-VT"     # the radio button value to select
 TEMPLATE       = json.loads(Path("template.json").read_text())
 USER_WAIT_SECS = 120              # seconds to wait for user to click Submit
 
