@@ -1,0 +1,12 @@
+# ─── VirusTotal API ───────────────────────────────────────────────────────────
+VT_API_KEY=
+VT_BASE_URL=
+
+# ─── Cache Settings ───────────────────────────────────────────────────────────
+CACHE_MAX_AGE_HOURS=
+
+# ─── Gmail API (email_sender.py) ──────────────────────────────────────────────
+GMAIL_CLIENT_ID=
+GMAIL_CLIENT_SECRET=
+
+
